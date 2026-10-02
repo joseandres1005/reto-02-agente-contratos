@@ -34,34 +34,36 @@ export interface AgentTurnResult {
 }
 
 function truncarHistorial(messages: LLMMessage[]): LLMMessage[] {
-  // Buscar el último mensaje "user" en el historial
-  // A partir de ahí, la secuencia es válida: user → assistant(tool_calls) → tool... → assistant → ...
-  let ultimoUserIdx = -1;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "user") {
-      ultimoUserIdx = i;
-      break;
-    }
-  }
-
-  // Si no hay user (raro), devolver solo el sistema + los últimos 8
-  if (ultimoUserIdx === -1) {
-    const system = messages[0];
-    return [system, ...messages.slice(-8)];
-  }
-
-  const system = messages[0];
-
-  // Si estamos por debajo del umbral y el historial es pequeño, devolverlo tal cual
   const MAX_MENSAJES = 20;
   if (messages.length <= MAX_MENSAJES) return messages;
 
-  // Cortar desde el último user hacia adelante (garantiza secuencia válida)
-  const desdeUltimoUser = messages.slice(ultimoUserIdx);
+  const system = messages[0];
+  const primerUser = messages.find((m) => m.role === "user");
 
-  // Si eso ya es mucho, cortar más agresivamente desde el último user
-  // pero siempre preservando el system al inicio
-  return [system, ...desdeUltimoUser];
+  // Los últimos 12 mensajes: siempre presentes
+  const ultimos = messages.slice(-12);
+
+  // Evitar cortar entre un assistant(tool_calls) y su tool
+  // Si el primer mensaje de "ultimos" es un "tool", retroceder hasta el assistant con tool_calls
+  let inicioAjustado = 0;
+  if (ultimos[0]?.role === "tool") {
+    // Buscar hacia atrás en el array original
+    const idxUltimos = messages.length - 12;
+    for (let i = idxUltimos; i >= 0; i--) {
+      if (messages[i].role === "assistant" && messages[i].tool_calls) {
+        inicioAjustado = idxUltimos - i;
+        break;
+      }
+    }
+  }
+
+
+  const ultimosAjustados = messages.slice(-12 - inicioAjustado);
+
+  if (primerUser && !ultimosAjustados.includes(primerUser)) {
+    return [system, primerUser, ...ultimosAjustados];
+  }
+  return [system, ...ultimosAjustados];
 }
 
 
