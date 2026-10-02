@@ -23,20 +23,23 @@ export const CampoExtraidoSchema = z.object({
 });
 export type CampoExtraido = z.infer<typeof CampoExtraidoSchema>;
 
+const campoVacio = () => ({ valor: null, confidence: 0 });
+
 export const ContratoSchema = z.object({
-  id_contrato: CampoExtraidoSchema,
-  cliente: CampoExtraidoSchema,
-  nit_cliente: CampoExtraidoSchema,
-  pais: CampoExtraidoSchema,
-  objeto: CampoExtraidoSchema,
-  valor: CampoExtraidoSchema,
-  moneda: CampoExtraidoSchema,
-  fecha_inicio: CampoExtraidoSchema,
-  fecha_fin: CampoExtraidoSchema,
-  requiere_poliza: CampoExtraidoSchema,
-  tipo_poliza: CampoExtraidoSchema,
-  confidence_global: z.number().min(0).max(1),
+  id_contrato: CampoExtraidoSchema.default(campoVacio()),
+  cliente: CampoExtraidoSchema.default(campoVacio()),
+  nit_cliente: CampoExtraidoSchema.default(campoVacio()),
+  pais: CampoExtraidoSchema.default(campoVacio()),
+  objeto: CampoExtraidoSchema.default(campoVacio()),
+  valor: CampoExtraidoSchema.default(campoVacio()),
+  moneda: CampoExtraidoSchema.default(campoVacio()),
+  fecha_inicio: CampoExtraidoSchema.default(campoVacio()),
+  fecha_fin: CampoExtraidoSchema.default(campoVacio()),
+  requiere_poliza: CampoExtraidoSchema.default(campoVacio()),
+  tipo_poliza: CampoExtraidoSchema.default(campoVacio()),
+  confidence_global: z.number().min(0).max(1).default(0),
 });
+
 export type Contrato = z.infer<typeof ContratoSchema>;
 
 export const ValidacionResultSchema = z.object({
