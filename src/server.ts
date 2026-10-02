@@ -277,7 +277,7 @@ const server = createServer(async (req, res) => {
 // MAIN
 // ============================================================================
 await ensureOutDir();
-server.listen(PORT, () => {
+server.listen(PORT, "0.0.0.0", () => {
   console.log(`\n🚀 Agente de contratos listo en http://localhost:${PORT}`);
   console.log(`   Modelo:  ${MODEL}`);
   console.log(`   Backend: ${BASE_URL}\n`);
