@@ -34,20 +34,34 @@ export interface AgentTurnResult {
 }
 
 function truncarHistorial(messages: LLMMessage[]): LLMMessage[] {
-  const MAX = 20;
-  if (messages.length <= MAX) return messages;
+  // Buscar el último mensaje "user" en el historial
+  // A partir de ahí, la secuencia es válida: user → assistant(tool_calls) → tool... → assistant → ...
+  let ultimoUserIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") {
+      ultimoUserIdx = i;
+      break;
+    }
+  }
+
+  // Si no hay user (raro), devolver solo el sistema + los últimos 8
+  if (ultimoUserIdx === -1) {
+    const system = messages[0];
+    return [system, ...messages.slice(-8)];
+  }
 
   const system = messages[0];
-  // Encontrar el primer user (el prompt original del usuario)
-  const primerUser = messages.find((m) => m.role === "user");
-  // Conservar los últimos 15 mensajes
-  const ultimos = messages.slice(-15);
 
-  // Si el primer user NO está en los últimos, lo incluimos al inicio
-  if (primerUser && !ultimos.includes(primerUser)) {
-    return [system, primerUser, ...ultimos];
-  }
-  return [system, ...ultimos];
+  // Si estamos por debajo del umbral y el historial es pequeño, devolverlo tal cual
+  const MAX_MENSAJES = 20;
+  if (messages.length <= MAX_MENSAJES) return messages;
+
+  // Cortar desde el último user hacia adelante (garantiza secuencia válida)
+  const desdeUltimoUser = messages.slice(ultimoUserIdx);
+
+  // Si eso ya es mucho, cortar más agresivamente desde el último user
+  // pero siempre preservando el system al inicio
+  return [system, ...desdeUltimoUser];
 }
 
 
