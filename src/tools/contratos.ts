@@ -508,6 +508,7 @@ export const validar = {
       : /cotizacion/i.test(adjunto)
         ? "COTIZACION"
         : "CONTRATO";
+    
     const contrato = extraerContratoDeterminista(texto, tipoDoc);
 
     const maestro = await leerMaestro(ctx.outDir);
@@ -517,6 +518,24 @@ export const validar = {
         "utf-8"
       )
     );
+
+    // RN4: si el adjunto es una cotización, rechazar directamente
+    const adjuntoCheck = correo.adjuntos[0] as string;
+    if (/cotizacion/i.test(adjuntoCheck)) {
+      const comercialCot = comerciales.find(
+        (c: { email: string }) => c.email === correo.de
+      );
+      const result: ValidacionResult = {
+        clasificacion: "rechazado",
+        id_contrato_existente: null,
+        requiere_revision: [],
+        motivo: "RN4: el adjunto es una cotización, no un contrato",
+        comercial: comercialCot ? comercialCot.nombre : "DESCONOCIDO",
+        region: comercialCot ? comercialCot.region : null,
+        diferencias: {},
+      };
+      return JSON.stringify({ ok: true, data: result });
+    }
 
     const comercial = comerciales.find(
       (c: { email: string }) => c.email === correo.de
@@ -532,6 +551,8 @@ export const validar = {
       | "rechazado" = "nuevo";
     let idExistente: string | null = null;
     const diferencias: Record<string, unknown> = {};
+
+    
 
     if (!idNuevo) {
       clasificacion = "rechazado";
