@@ -42,16 +42,20 @@ export class OpenAICompatibleAdapter implements LLMAdapter {
     private temperature = 0.1
   ) {}
 
-  async send(
+  async send(  
     messages: LLMMessage[],
     tools: LLMToolDef[]
   ): Promise<LLMResponse> {
     const url = `${this.baseUrl.replace(/\/$/, "")}/chat/completions`;
 
+    // Detectar si es OpenAI oficial: usa max_completion_tokens en lugar de max_tokens
+    const esOpenAIOficial = /api\.openai\.com/i.test(this.baseUrl);
+    const tokenParam = esOpenAIOficial ? "max_completion_tokens" : "max_tokens";
+
     const body: Record<string, unknown> = {
       model: this.model,
       messages,
-      max_tokens: this.maxTokens,
+      [tokenParam]: this.maxTokens,
       temperature: this.temperature,
     };
 
