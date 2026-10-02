@@ -191,6 +191,16 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  // GET /api/version (diagnóstico temporal)
+  if (req.method === "GET" && url.pathname === "/api/version") {
+    json(res, 200, {
+      ok: true,
+      version: "rn4-cotizacion-fix",
+      hasRN4: true,
+    });
+    return;
+  }
+
   // GET /api/health
   if (req.method === "GET" && url.pathname === "/api/health") {
     json(res, 200, { ok: true, provider: BASE_URL, model: MODEL });
