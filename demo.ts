@@ -14,8 +14,6 @@ import {
   registrar,
   alertas,
   type ToolContext,
-  type ValidacionResult,
-  type Contrato,
 } from "./src/tools/contratos.ts";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -60,13 +58,11 @@ async function preparar() {
   titulo("DEMO — Procesamiento determinista del buzón (sin LLM)");
   console.log("Reto 02 · Periferia IT Group · Agente de Registro de Contratos\n");
 
-  // Limpiar out/
   if (existsSync(OUT)) {
     await rm(OUT, { recursive: true, force: true });
   }
   await mkdir(join(OUT, "sharepoint"), { recursive: true });
 
-  // Copiar fixture del maestro a out/ (RN6)
   await cp(
     join(FIXTURES, "maestro-contratos.csv"),
     join(OUT, "sharepoint/maestro-contratos.csv")
@@ -102,41 +98,37 @@ async function primeraPasada() {
       `\n   🔍 Clasificación: ${tieneContrato ? "CONTRATO/OTROSÍ" : "SIN CONTRATO"}`
     );
 
+    // 1. Validar (recalcula internamente)
+    const val = safeJSON(await validar.execute({ mensaje_id: msg.id }, ctx));
+    if (!val.ok) {
+      console.log(`   ❌ Error validación: ${val.error}`);
+      continue;
+    }
+    const v = val.data;
+
+    // Si es sin contrato, solo validar y registrar (que omitirá)
     if (!tieneContrato) {
-      const v = safeJSON(
-        await validar.execute(
-          { mensaje_id: msg.id, contrato: contratoVacio() },
-          ctx
-        )
+      console.log(`   ⛔ ${v.motivo}`);
+      const reg = safeJSON(
+        await registrar.execute({ mensaje_id: msg.id, confirmado: false }, ctx)
       );
-      console.log(`   ⛔ RN4 aplica: ${v.data.motivo}`);
-      const r = safeJSON(
-        await registrar.execute(
-          {
-            mensaje_id: msg.id,
-            contrato: contratoVacio(),
-            validacion: v.data,
-            confirmado: false,
-          },
-          ctx
-        )
-      );
-      console.log(`   📦 Acción: ${r.data.accion}`);
+      console.log(`   📦 Acción: ${reg.data?.accion ?? "omitido"}`);
       resultados.push({
         msg: msg.id,
-        clasif: "rechazado",
-        accion: r.data.accion,
+        clasif: v.clasificacion,
+        accion: reg.data?.accion ?? "omitido",
         revision: [],
       });
       continue;
     }
 
+    // 2. Extraer solo para mostrar los campos en el log
     const ex = safeJSON(await extraer.execute({ mensaje_id: msg.id }, ctx));
     if (!ex.ok) {
       console.log(`   ❌ Error extracción: ${ex.error}`);
       continue;
     }
-    const contrato: Contrato = ex.data.contrato;
+    const contrato = ex.data.contrato;
 
     console.log(
       `\n   📄 Extracción (confianza global: ${contrato.confidence_global.toFixed(2)}):`
@@ -163,17 +155,11 @@ async function primeraPasada() {
       `      póliza:       ${contrato.requiere_poliza.valor} / ${contrato.tipo_poliza.valor ?? "-"}`
     );
 
-    const val = safeJSON(
-      await validar.execute({ mensaje_id: msg.id, contrato }, ctx)
-    );
-    if (!val.ok) {
-      console.log(`   ❌ Error validación: ${val.error}`);
-      continue;
-    }
-    const v: ValidacionResult = val.data;
-
+    // 3. Mostrar validación
     console.log(`\n   ✅ Validación: ${v.clasificacion.toUpperCase()}`);
-    console.log(`      comercial: ${v.comercial}${v.region ? ` (${v.region})` : ""}`);
+    console.log(
+      `      comercial: ${v.comercial}${v.region ? ` (${v.region})` : ""}`
+    );
     if (v.id_contrato_existente)
       console.log(`      contrato existente: ${v.id_contrato_existente}`);
     if (v.requiere_revision.length > 0) {
@@ -187,19 +173,12 @@ async function primeraPasada() {
       console.log(`      diferencias: ${JSON.stringify(v.diferencias)}`);
     }
 
+    // 4. Registrar (recalcula internamente)
     const reg = safeJSON(
-      await registrar.execute(
-        {
-          mensaje_id: msg.id,
-          contrato,
-          validacion: v,
-          confirmado: false,
-        },
-        ctx
-      )
+      await registrar.execute({ mensaje_id: msg.id, confirmado: false }, ctx)
     );
 
-    if (reg.ok && reg.data.accion !== "rechazado") {
+    if (reg.ok && reg.data?.accion && reg.data.accion !== "rechazado") {
       console.log(
         `   💾 Registro: ${reg.data.accion} → ${reg.data.id_contrato ?? "—"}`
       );
@@ -234,41 +213,10 @@ async function segundaPasada() {
   seccion("SEGUNDA PASADA — Confirmación humana de msg-006");
   console.log(`👤 Usuario: "Confirmo el valor 0 y la fecha fin 2027-08-31"\n`);
 
-  const ex = safeJSON(await extraer.execute({ mensaje_id: "msg-006" }, ctx));
-  const contrato: Contrato = ex.data.contrato;
-
-  // Ajustar los campos confirmados por el usuario
-  contrato.valor = {
-    valor: 0,
-    confidence: 1.0,
-    raw_span: "confirmado por usuario",
-  };
-  contrato.fecha_fin = {
-    valor: "2027-08-31",
-    confidence: 1.0,
-    raw_span: "confirmado por usuario",
-  };
-
-  const val = safeJSON(
-    await validar.execute({ mensaje_id: "msg-006", contrato }, ctx)
-  );
-  val.data.requiere_revision = []; // usuario confirmó todo
-
-  console.log(`   📄 Extracción confirmada:`);
-  console.log(
-    `      valor: ${contrato.valor.valor}, fecha_fin: ${contrato.fecha_fin.valor}`
-  );
-
+  // En el diseño nuevo, la confirmación es simplemente pasar confirmado: true.
+  // El extractor determinista + herencia de campos se encargan del resto.
   const reg = safeJSON(
-    await registrar.execute(
-      {
-        mensaje_id: "msg-006",
-        contrato,
-        validacion: val.data,
-        confirmado: true,
-      },
-      ctx
-    )
+    await registrar.execute({ mensaje_id: "msg-006", confirmado: true }, ctx)
   );
 
   if (reg.ok) {
@@ -336,27 +284,6 @@ function resumenFinal(resultados: any[]) {
   console.log(`   - out/log.jsonl`);
   console.log(`   - out/alertas.md`);
   console.log(`\n✅ Demo completada — resultado determinista y reproducible.\n`);
-}
-
-// ============================================================================
-// FIXTURE VACÍO
-// ============================================================================
-function contratoVacio(): Contrato {
-  const vacio = { valor: null, confidence: 0 };
-  return {
-    id_contrato: vacio,
-    cliente: vacio,
-    nit_cliente: vacio,
-    pais: vacio,
-    objeto: vacio,
-    valor: vacio,
-    moneda: vacio,
-    fecha_inicio: vacio,
-    fecha_fin: vacio,
-    requiere_poliza: vacio,
-    tipo_poliza: vacio,
-    confidence_global: 0,
-  };
 }
 
 // ============================================================================

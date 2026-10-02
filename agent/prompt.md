@@ -35,3 +35,11 @@ a leer el buzón ni a extraer. Ejecuta SOLO estos pasos:
   contrato adjunto (cotizaciones). Para los que no tienen contrato,
   el clasificador debe marcarlos como `rechazado`.
 - No te saltes ningún mensaje.
+
+## Contratos de herramientas simplificados
+
+- `contratos_validar` solo requiere `{ mensaje_id }`. NO le pases el contrato completo.
+- `contratos_registrar` solo requiere `{ mensaje_id, confirmado }`. NO le pases el contrato ni la validación.
+- El contrato y la validación se recalculan internamente dentro de cada herramienta.
+- Ejemplo correcto: `contratos_validar({ "mensaje_id": "msg-003" })`
+- Ejemplo incorrecto: `contratos_validar({ "mensaje_id": "msg-003", "contrato": {...} })`

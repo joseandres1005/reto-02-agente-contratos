@@ -487,15 +487,29 @@ export const extraer = {
 // --- contratos_validar ---
 export const validar = {
   description:
-    "Clasifica el contrato como nuevo, actualización, duplicado o rechazado.",
+    "Clasifica el contrato como nuevo, actualización, duplicado o rechazado. Solo requiere el ID del mensaje.",
   args: {
-    mensaje_id: z.string(),
-    contrato: ContratoSchema,
+    mensaje_id: z.string().describe("ID del mensaje del buzón (msg-001 a msg-006)"),
   },
   async execute(
-    args: { mensaje_id: string; contrato: Contrato },
+    args: { mensaje_id: string },
     ctx: ToolContext
   ): Promise<string> {
+    // Re-extraer el contrato internamente (determinista)
+    const buzonDir = join(ctx.directory, "fixtures/reto-02/buzon");
+    const carpeta = join(buzonDir, args.mensaje_id);
+    const correo = JSON.parse(
+      await readFile(join(carpeta, "correo.json"), "utf-8")
+    );
+    const adjunto = correo.adjuntos[0];
+    const texto = await readFile(join(carpeta, adjunto), "utf-8");
+    const tipoDoc = /otrosi/i.test(adjunto)
+      ? "OTROSI"
+      : /cotizacion/i.test(adjunto)
+        ? "COTIZACION"
+        : "CONTRATO";
+    const contrato = extraerContratoDeterminista(texto, tipoDoc);
+
     const maestro = await leerMaestro(ctx.outDir);
     const comerciales = JSON.parse(
       await readFile(
@@ -503,20 +517,14 @@ export const validar = {
         "utf-8"
       )
     );
-    const buzonDir = join(ctx.directory, "fixtures/reto-02/buzon");
-    const correo = JSON.parse(
-      await readFile(join(buzonDir, args.mensaje_id, "correo.json"), "utf-8")
-    );
 
-    // Resolución de autoría
     const comercial = comerciales.find(
       (c: { email: string }) => c.email === correo.de
     );
     const comercialNombre = comercial ? comercial.nombre : "DESCONOCIDO";
     const region = comercial ? comercial.region : null;
 
-    // Clasificación
-    const idNuevo = args.contrato.id_contrato.valor as string | null;
+    const idNuevo = contrato.id_contrato.valor as string | null;
     let clasificacion:
       | "nuevo"
       | "actualizacion"
@@ -531,11 +539,11 @@ export const validar = {
       const filaExistente = maestro.find((f) => f.id_contrato === idNuevo);
       if (filaExistente) {
         const mismoValor =
-          Number(filaExistente.valor) === Number(args.contrato.valor.valor);
+          Number(filaExistente.valor) === Number(contrato.valor.valor);
         const mismaFechaIni =
-          filaExistente.fecha_inicio === args.contrato.fecha_inicio.valor;
+          filaExistente.fecha_inicio === contrato.fecha_inicio.valor;
         const mismaFechaFin =
-          filaExistente.fecha_fin === args.contrato.fecha_fin.valor;
+          filaExistente.fecha_fin === contrato.fecha_fin.valor;
 
         if (mismoValor && mismaFechaIni && mismaFechaFin) {
           clasificacion = "duplicado";
@@ -544,70 +552,63 @@ export const validar = {
           clasificacion = "actualizacion";
           idExistente = filaExistente.id_contrato;
 
-          // -------------------------------------------------------------
-          // HERENCIA DE CAMPOS: si el otrosí no menciona un campo,
-          // se hereda del contrato original para no perder información.
-          // -------------------------------------------------------------
-          if (!args.contrato.fecha_inicio.valor) {
-            args.contrato.fecha_inicio = {
+          if (!contrato.fecha_inicio.valor) {
+            contrato.fecha_inicio = {
               valor: filaExistente.fecha_inicio,
               confidence: 1.0,
               raw_span: "heredado del maestro",
             };
           }
-          if (!args.contrato.fecha_fin.valor) {
-            // Si el otrosí modifica fecha_fin, se usa el valor nuevo.
-            // Si no, se hereda del maestro.
-            args.contrato.fecha_fin = {
+          if (!contrato.fecha_fin.valor) {
+            contrato.fecha_fin = {
               valor: filaExistente.fecha_fin,
               confidence: 1.0,
               raw_span: "heredado del maestro",
             };
           }
-          if (!args.contrato.objeto.valor) {
-            args.contrato.objeto = {
+          if (!contrato.objeto.valor) {
+            contrato.objeto = {
               valor: filaExistente.objeto,
               confidence: 1.0,
               raw_span: "heredado del maestro",
             };
           }
-          if (!args.contrato.moneda.valor) {
-            args.contrato.moneda = {
+          if (!contrato.moneda.valor) {
+            contrato.moneda = {
               valor: filaExistente.moneda,
               confidence: 1.0,
               raw_span: "heredado del maestro",
             };
           }
           if (
-            !args.contrato.requiere_poliza.valor &&
+            !contrato.requiere_poliza.valor &&
             filaExistente.requiere_poliza === "true"
           ) {
-            args.contrato.requiere_poliza = {
+            contrato.requiere_poliza = {
               valor: true,
               confidence: 1.0,
               raw_span: "heredado del maestro",
             };
-            args.contrato.tipo_poliza = {
+            contrato.tipo_poliza = {
               valor: filaExistente.tipo_poliza,
               confidence: 1.0,
               raw_span: "heredado del maestro",
             };
           }
 
-          // Registrar diferencias
           if (!mismoValor)
             diferencias.valor = {
               antes: Number(filaExistente.valor),
-              despues: args.contrato.valor.valor,
+              despues: contrato.valor.valor,
             };
           if (!mismaFechaFin)
             diferencias.fecha_fin = {
               antes: filaExistente.fecha_fin,
-              despues: args.contrato.fecha_fin.valor,
+              despues: contrato.fecha_fin.valor,
             };
           if (
             filaExistente.estado_poliza === "vigente" &&
-            args.contrato.fecha_fin.valor !== filaExistente.fecha_fin
+            contrato.fecha_fin.valor !== filaExistente.fecha_fin
           ) {
             diferencias.estado_poliza = {
               antes: "vigente",
@@ -618,14 +619,13 @@ export const validar = {
       }
     }
 
-    // Campos que requieren revisión (RN5)
     const requiere_revision: string[] = [];
     const umbral = 0.80;
     const camposCriticos: [string, CampoExtraido][] = [
-      ["valor", args.contrato.valor],
-      ["fecha_inicio", args.contrato.fecha_inicio],
-      ["fecha_fin", args.contrato.fecha_fin],
-      ["moneda", args.contrato.moneda],
+      ["valor", contrato.valor],
+      ["fecha_inicio", contrato.fecha_inicio],
+      ["fecha_fin", contrato.fecha_fin],
+      ["moneda", contrato.moneda],
     ];
     for (const [nombre, campo] of camposCriticos) {
       if (campo.confidence < umbral) requiere_revision.push(nombre);
@@ -654,30 +654,27 @@ export const validar = {
 };
 
 // --- contratos_registrar ---
-// --- contratos_registrar ---
 export const registrar = {
   description:
-    "Registra o actualiza un contrato en el maestro de SharePoint simulado.",
+    "Registra o actualiza un contrato en el maestro. Solo requiere el ID del mensaje y si el humano confirmó.",
   args: {
     mensaje_id: z.string(),
-    contrato: ContratoSchema,
-    validacion: ValidacionResultSchema,
-    confirmado: z
-      .boolean()
-      .describe("Confirmación humana (default false)")
-      .optional(),
+    confirmado: z.boolean().default(false),
   },
   async execute(
-    args: {
-      mensaje_id: string;
-      contrato: Contrato;
-      validacion: ValidacionResult;
-      confirmado?: boolean;
-    },
+    args: { mensaje_id: string; confirmado: boolean },
     ctx: ToolContext
   ): Promise<string> {
-    const { validacion } = args;
-    const confirmado = args.confirmado ?? false;
+    // Re-extraer contrato y validación internamente
+    const valRes = JSON.parse(
+      await validar.execute({ mensaje_id: args.mensaje_id }, ctx)
+    );
+    const validacion: ValidacionResult = valRes.data;
+
+    const exRes = JSON.parse(
+      await extraer.execute({ mensaje_id: args.mensaje_id }, ctx)
+    );
+    const contrato: Contrato = exRes.data.contrato;
 
     // No registrar duplicados ni rechazados
     if (
@@ -703,7 +700,7 @@ export const registrar = {
     }
 
     // RN5: requiere revisión sin confirmación
-    if (validacion.requiere_revision.length > 0 && !confirmado) {
+    if (validacion.requiere_revision.length > 0 && !args.confirmado) {
       await log(
         ctx,
         "contratos_registrar",
@@ -724,10 +721,10 @@ export const registrar = {
     // Escribir en el maestro
     const maestroPath = join(ctx.outDir, "sharepoint/maestro-contratos.csv");
     const maestro = await leerMaestro(ctx.outDir);
-    const idContrato = args.contrato.id_contrato.valor as string;
+    const idContrato = contrato.id_contrato.valor as string;
     const idx = maestro.findIndex((f) => f.id_contrato === idContrato);
 
-    const fila = construirFila(args.contrato, validacion, args.mensaje_id);
+    const fila = construirFila(contrato, validacion, args.mensaje_id);
 
     if (idx >= 0) {
       maestro[idx] = fila;
@@ -752,9 +749,8 @@ export const registrar = {
     }
 
     // Archivar
-    const anio =
-      (args.contrato.fecha_inicio.valor as string)?.slice(0, 4) ?? "2026";
-    const slug = slugify(args.contrato.cliente.valor as string);
+    const anio = (contrato.fecha_inicio.valor as string)?.slice(0, 4) ?? "2026";
+    const slug = slugify(contrato.cliente.valor as string);
     const archiveDir = join(ctx.outDir, "sharepoint/Contratos", anio, slug);
     await mkdir(archiveDir, { recursive: true });
     const buzonDir = join(ctx.directory, "fixtures/reto-02/buzon");
@@ -772,7 +768,6 @@ export const registrar = {
       "utf-8"
     );
 
-    // Marcar procesado
     await marcarProcesado(
       ctx,
       args.mensaje_id,
